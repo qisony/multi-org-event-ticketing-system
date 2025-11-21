@@ -347,7 +347,7 @@ async def ask_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         "Введите Telegram ID пользователя (цифры) для назначения админом (роль 'org_admin'):",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    return INPUT_ADD_ADMIN_ID
+    return INPUT_ADD_ADMIN_LOGIN
 
 
 async def add_admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1377,4 +1377,5 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
