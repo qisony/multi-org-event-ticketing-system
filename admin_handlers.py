@@ -309,8 +309,9 @@ async def org_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_ca
     if role in [ROLE_SUPER_ADMIN, ROLE_ORG_OWNER]:
         keyboard.append([InlineKeyboardButton("👤 Управление Админами", callback_data="add_admin")])
         keyboard.append([InlineKeyboardButton("📢 Рассылка (Org)", callback_data="start_org_broadcast")])
-
-    keyboard.append([InlineKeyboardButton("💳 Настроить Карту", callback_data="set_org_card")])
+        keyboard.append([InlineKeyboardButton("🗑️ Удалить организацию", callback_data="start_delete_org")])
+        keyboard.append([InlineKeyboardButton("💳 Настроить Карту", callback_data="set_org_card")])
+        
     keyboard.append([InlineKeyboardButton("🔙 Назад к списку", callback_data="back_lvl2")])
 
     text = f"⚙️ <b>Управление организацией:</b> <code>{safe_org_name}</code>\nВаша роль: <b>{role}</b>"
@@ -1139,6 +1140,51 @@ async def confirm_delete_org(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return await list_orgs(update, context, direct_call=True)
 
 
+# admin_handlers.py (Функции START и CONFIRM)
+
+# --- DELETE ORGANIZATION ---
+async def start_delete_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Запрашивает подтверждение перед удалением организации."""
+    query = update.callback_query
+    await query.answer()
+    org_id = context.user_data['curr_org_id']
+    # Предполагается, что get_org_name определена в db_utils
+    from db_utils import get_org_name 
+    org_name = get_org_name(org_id) 
+
+    keyboard = [
+        [InlineKeyboardButton("🗑️ ДА, УДАЛИТЬ ВСЁ", callback_data="confirm_del_org")],
+        [InlineKeyboardButton("🔙 НЕТ, ОТМЕНА", callback_data="back_menu_org")]
+    ]
+    
+    await query.edit_message_text(
+        f"🔥 <b>УДАЛЕНИЕ ОРГАНИЗАЦИИ '{escape_html(org_name)}'</b> 🔥\n\n"
+        f"Вы собираетесь удалить организацию и <b>ВСЕ</b> связанные мероприятия, билеты и настройки.\n"
+        f"<b>Это действие необратимо!</b>\n\n"
+        f"Вы уверены?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='HTML'
+    )
+    # ORG_DELETE_CONFIRM - это состояние, в котором мы ждем нажатия "ДА" или "НЕТ"
+    return ORG_DELETE_CONFIRM 
+
+async def confirm_delete_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Выполняет удаление организации из БД."""
+    query = update.callback_query
+    await query.answer()
+    org_id = context.user_data['curr_org_id']
+    
+    # Предполагается, что delete_organization_db(org_id) определена в db_utils
+    from db_utils import delete_organization_db
+    if delete_organization_db(org_id):
+        await query.edit_message_text("✅ Организация успешно удалена.", parse_mode='HTML')
+    else:
+        await query.edit_message_text("❌ Ошибка при удалении организации.", parse_mode='HTML')
+        
+    # Возврат к списку организаций (LVL2_ORG_LIST)
+    return await list_orgs(update, context, direct_call=True)
+
+
 # --- MAIN HANDLER (ОБНОВЛЕНО) ---
 
 admin_handler = ConversationHandler(
@@ -1177,9 +1223,17 @@ admin_handler = ConversationHandler(
             CallbackQueryHandler(ask_admin_id, pattern="^add_admin"),
             CallbackQueryHandler(start_check_ticket, pattern="^check_ticket_org"),
             CallbackQueryHandler(select_broadcast_audience, pattern="^start_org_broadcast$"),
+            CallbackQueryHandler(start_delete_org, pattern="^start_delete_org$"),
             CallbackQueryHandler(ask_org_card, pattern="^set_org_card$"),
             CallbackQueryHandler(list_orgs, pattern="^back_lvl2"),
             CallbackQueryHandler(org_menu, pattern="^back_menu_org")
+        ],
+
+        ORG_DELETE_CONFIRM: [
+            # 2. С кнопки "ДА, УДАЛИТЬ ВСЁ" (confirm_delete_org)
+            CallbackQueryHandler(confirm_delete_org, pattern="^confirm_del_org$"),
+            # 3. С кнопки "НЕТ, ОТМЕНА" (возвращаемся в org_menu)
+            CallbackQueryHandler(org_menu, pattern="^back_menu_org$") 
         ],
 
         INPUT_ADD_ADMIN_LOGIN: [ # LOGIN
@@ -1317,4 +1371,5 @@ admin_handler = ConversationHandler(
         ],
     },
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
+
 )
