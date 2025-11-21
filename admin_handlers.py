@@ -1221,8 +1221,6 @@ async def stop_bot_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     logging.warning(f"⚠️ Бот остановлен командой /stop_bot от Супер-Админа {user_id}.")
     await update.message.reply_text("🔴 **Бот остановлен.** Завершаю работу...", parse_mode='HTML')
     
-    # 2. Вызов грациозного завершения работы
-    await context.application.shutdown()
     
     # 3. НОВОЕ: Принудительное завершение процесса Python
     os._exit(0)
@@ -1419,6 +1417,7 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
 
