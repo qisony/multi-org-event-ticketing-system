@@ -887,3 +887,30 @@ def set_user_as_org_creator(chat_id: int, limit: int) -> bool:
     finally:
         conn.close()
 
+
+# db_utils.py
+
+# ... (Остальные импорты и функции) ...
+# ... (Предполагается, что connect_db() существует) ...
+
+def get_user_org_count(chat_id: int) -> int:
+    """
+    Получает количество организаций, которые пользователь может создать.
+    Используется для проверки прав "Владельца" (Org Creator).
+    """
+    conn = connect_db()
+    if not conn: return 0
+    cursor = conn.cursor()
+    try:
+        # Считываем значение из поля org_owned_count
+        cursor.execute("SELECT org_owned_count FROM users WHERE chat_id = %s", (chat_id,))
+        row = cursor.fetchone()
+        # Возвращаем значение или 0, если пользователь не найден
+        return row[0] if row and row[0] is not None else 0
+    except Exception as e:
+        logging.error(f"Get user org count error: {e}")
+        return 0
+    finally:
+        cursor.close()
+        conn.close()
+
