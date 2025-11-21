@@ -1223,6 +1223,9 @@ async def stop_bot_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     # 2. Вызов грациозного завершения работы
     await context.application.shutdown()
+    
+    # 3. НОВОЕ: Принудительное завершение процесса Python
+    os._exit(0)
 
 
 
@@ -1416,6 +1419,7 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
 
