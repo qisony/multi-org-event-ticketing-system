@@ -67,11 +67,12 @@ def main():
     app.run_webhook(
         listen="0.0.0.0",
         port=10000, # Используйте порт, который Render назначил вашему сервису (обычно 10000)
-        url_path="webhook" # Путь, который Telegram будет использовать
+        url_path="/api/webhook.py" # Путь, который Telegram будет использовать
     )
 
 
 if __name__ == '__main__':
 
     main()
+
 
