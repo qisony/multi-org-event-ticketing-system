@@ -139,5 +139,6 @@ if __name__ == '__main__':
 
 if __name__ == '__main__':
     logger.info("Bot execution started...")
-    main()
+    asyncio.run(main_async())
+
 
