@@ -68,6 +68,7 @@ def create_tables():
             PRIMARY KEY (org_id, user_id)
         );""",
 
+        
         # 4. Черный список (Org)
         """CREATE TABLE IF NOT EXISTS org_blacklist (
             org_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
@@ -855,4 +856,5 @@ def process_refund_ticket(ticket_id: str) -> tuple[bool, str, int, int]:
         return False, "Ошибка БД", 0, 0
     finally:
         cursor.close()
+
         conn.close()
