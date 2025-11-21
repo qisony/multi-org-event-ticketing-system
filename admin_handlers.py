@@ -222,7 +222,7 @@ async def list_orgs(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_c
 
         # Проверка лимита для владельцев
         org_count = get_user_org_count(user_id)
-        if org_count < ORG_LIMIT_PER_OWNER:
+        if org_count > 0:
             can_create = True
         else:
             can_create = False
@@ -1419,6 +1419,7 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
 
