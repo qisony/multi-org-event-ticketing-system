@@ -59,9 +59,19 @@ def main():
     app.add_handler(CommandHandler("cancel", cancel_global))
 
     logger.info("Bot started...")
-    app.run_polling()
+    # 1. Установите URL для Telegram
+    await app.bot.set_webhook(url="ВАШ_URL_RENDER/webhook")
+
+    # 2. Запустите Webhook-сервер
+    # Порт 10000 является стандартом для Render
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=10000, # Используйте порт, который Render назначил вашему сервису (обычно 10000)
+        url_path="webhook" # Путь, который Telegram будет использовать
+    )
 
 
 if __name__ == '__main__':
 
     main()
+
