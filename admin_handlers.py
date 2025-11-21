@@ -33,6 +33,9 @@ ORG_LIMIT_PER_OWNER = 2
     LVL5_EVENT_MENU,
     LVL6_PROMO_MENU,  # Из предыдущего шага
 
+    LVL4_ADMIN_MENU,        # Отображение списка админов
+    ASK_TRANSFER_CONFIRM,   # Подтверждение передачи прав
+
     # Input/Action States
     INPUT_NEW_ORG_NAME,
 
@@ -70,7 +73,7 @@ ORG_LIMIT_PER_OWNER = 2
 
     # Сброс БД
     DB_RESET_CONFIRM
-) = range(28)  # <-- Убедитесь, что число в range() соответствует общему количеству состояний.
+) = range(30)  # <-- Убедитесь, что число в range() соответствует общему количеству состояний.
 
 
 # --- LEVEL 1: SUPER ADMIN MAIN MENU ---
@@ -333,10 +336,11 @@ async def org_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_ca
     ]
 
     if role in [ROLE_SUPER_ADMIN, ROLE_ORG_OWNER]:
-        keyboard.append([InlineKeyboardButton("👤 Управление Админами", callback_data="add_admin")])
-        keyboard.append([InlineKeyboardButton("📢 Рассылка (Org)", callback_data="start_org_broadcast")])
-        keyboard.append([InlineKeyboardButton("💳 Настроить Карту", callback_data="set_org_card")])
-        keyboard.append([InlineKeyboardButton("🗑️ Удалить организацию", callback_data="start_delete_org")])
+        owner_buttons = [
+            [InlineKeyboardButton("👥 Управление админами", callback_data='manage_admins')], # Убедитесь, что здесь 'manage_admins'        keyboard.append([InlineKeyboardButton("📢 Рассылка (Org)", callback_data="start_org_broadcast")])
+            [InlineKeyboardButton("💳 Настроить Карту", callback_data="set_org_card")],
+            [InlineKeyboardButton("🗑️ Удалить организацию", callback_data="start_delete_org")]
+        ]
         
     keyboard.append([InlineKeyboardButton("🔙 Назад к списку", callback_data="back_lvl2")])
 
@@ -1226,6 +1230,144 @@ async def stop_bot_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     os._exit(0)
 
 
+# admin_handlers.py
+
+async def manage_admins_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Вход в меню управления администраторами.
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    return await show_admin_menu(update, context)
+
+
+async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Отображает список администраторов организации с опциями: Удалить/Передать права.
+    """
+    org_id = context.user_data.get('selected_org_id')
+    current_user_id = update.effective_user.id
+    
+    # Получаем список администраторов
+    admins_list = get_org_admins_list(org_id)
+    
+    if not admins_list:
+        text = "⚠️ Не удалось получить список администраторов."
+        await update.effective_message.edit_text(text, 
+                                          reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data='back_menu_org')]]))
+        return LVL3_ORG_MENU
+    
+    keyboard = []
+    text = f"⚙️ *Администраторы организации (ID: {org_id}):*\n\n"
+    
+    # 1. Список админов
+    for admin in admins_list:
+        user_id = admin['chat_id']
+        username = escape_html(admin['username'])
+        role_label = "👑 Владелец" if admin['role'] == ROLE_ORG_OWNER else "👤 Админ"
+        
+        # Строка с информацией
+        keyboard.append([InlineKeyboardButton(f"{role_label}: {username}", callback_data='ignore_info')])
+        
+        # Строка с действиями (нельзя удалить или передать права самому себе)
+        if user_id != current_user_id:
+            action_row = [
+                InlineKeyboardButton("❌ Удалить", callback_data=f'rm_admin_{user_id}'),
+                InlineKeyboardButton("👑 Передать права", callback_data=f'transfer_{user_id}')
+            ]
+            keyboard.append(action_row)
+
+        keyboard.append([InlineKeyboardButton("—", callback_data='ignore_divider')]) # Разделитель
+        
+    # 2. Основные кнопки управления
+    control_buttons = [
+        InlineKeyboardButton("➕ Добавить админа", callback_data='ask_add_admin_login'), 
+    ]
+    keyboard.append(control_buttons)
+    
+    # 3. Кнопка "Назад"
+    keyboard.append([InlineKeyboardButton("⬅️ Назад в меню", callback_data='back_menu_org')])
+    
+    await update.callback_query.edit_message_text(text, 
+                                                  reply_markup=InlineKeyboardMarkup(keyboard), 
+                                                  parse_mode='Markdown')
+
+    return LVL4_ADMIN_MENU
+
+
+async def ask_transfer_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Запрос подтверждения передачи прав.
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    # Извлекаем ID нового потенциального владельца
+    new_owner_id = int(query.data.split('_')[1]) 
+    org_id = context.user_data.get('selected_org_id')
+
+    # Получаем его username
+    new_owner_info = get_user_info(new_owner_id) # Предполагая, что get_user_info существует в db_utils
+    new_owner_username = new_owner_info.get('username') if new_owner_info else f"ID: {new_owner_id}"
+
+    # Сохраняем ID нового владельца для следующего шага
+    context.user_data['new_owner_id_to_transfer'] = new_owner_id
+    context.user_data['old_owner_id'] = update.effective_user.id
+    
+    text = (f"⚠️ *Подтверждение передачи прав*\n\n"
+            f"Вы уверены, что хотите передать права владельца организации (ID: {org_id}) "
+            f"пользователю `{escape_html(new_owner_username)}`?\n\n"
+            f"❌ *Это действие необратимо!* Ваша роль будет понижена до обычного администратора.")
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Подтвердить передачу прав", callback_data='confirm_transfer_ownership')],
+        [InlineKeyboardButton("⬅️ Отмена", callback_data='back_to_admin_menu')]
+    ]
+    
+    await query.edit_message_text(text, 
+                                  reply_markup=InlineKeyboardMarkup(keyboard), 
+                                  parse_mode='Markdown')
+
+    return ASK_TRANSFER_CONFIRM
+
+
+async def process_transfer_ownership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Выполняет передачу прав владельца.
+    """
+    query = update.callback_query
+    await query.answer()
+
+    new_owner_id = context.user_data.pop('new_owner_id_to_transfer', None)
+    old_owner_id = context.user_data.pop('old_owner_id', None)
+    org_id = context.user_data.get('selected_org_id')
+    
+    if not new_owner_id or not old_owner_id or not org_id:
+        text = "❌ Ошибка: Не удалось найти данные для передачи прав. Начните заново."
+        # Возврат в меню организации
+        return await org_menu(update, context) 
+    
+    # Выполнение передачи
+    success = transfer_org_ownership(org_id, new_owner_id, old_owner_id)
+    
+    if success:
+        new_owner_info = get_user_info(new_owner_id)
+        new_owner_username = new_owner_info.get('username') if new_owner_info else f"ID: {new_owner_id}"
+        
+        text = (f"✅ *Права владельца успешно переданы!*\n\n"
+                f"Новый владелец: `{escape_html(new_owner_username)}`\n"
+                f"Ваша роль понижена до Администратора.")
+    else:
+        text = "❌ Критическая ошибка при передаче прав владельца. Проверьте логи сервера."
+        
+    await query.edit_message_text(text, 
+                                  reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад в меню", callback_data='back_menu_org')]]), 
+                                  parse_mode='Markdown')
+    
+    # Старый владелец (теперь админ) возвращается в меню, где увидит свой новый набор кнопок
+    return LVL3_ORG_MENU
+    
 
 # --- MAIN HANDLER (ОБНОВЛЕНО) ---
 
@@ -1262,7 +1404,7 @@ admin_handler = ConversationHandler(
 
         LVL3_ORG_MENU: [
             CallbackQueryHandler(list_events, pattern="^goto_events"),
-            CallbackQueryHandler(ask_admin_id, pattern="^add_admin"),
+            CallbackQueryHandler(manage_admins_entry, pattern="^manage_admins$"),
             CallbackQueryHandler(start_check_ticket, pattern="^check_ticket_org"),
             CallbackQueryHandler(select_broadcast_audience, pattern="^start_org_broadcast$"),
             CallbackQueryHandler(ask_org_card, pattern="^set_org_card$"),
@@ -1270,9 +1412,10 @@ admin_handler = ConversationHandler(
             CallbackQueryHandler(org_menu, pattern="^back_menu_org")
         ],
 
-        INPUT_ADD_ADMIN_LOGIN: [ # LOGIN
-             MessageHandler(filters.TEXT & ~filters.COMMAND, add_admin_handler),
-             CallbackQueryHandler(org_menu, pattern="^back_menu_org")
+        INPUT_ADD_ADMIN_LOGIN: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, process_admin_add_login),
+            # Важно: возврат должен вести в новый список админов
+            CallbackQueryHandler(show_admin_menu, pattern="^back_to_admin_menu$"), 
         ],
 
         INPUT_ORG_CARD: [
@@ -1291,12 +1434,35 @@ admin_handler = ConversationHandler(
             CallbackQueryHandler(org_menu, pattern="^back_menu_org")
         ],
 
+
+        # НОВОЕ СОСТОЯНИЕ: Список админов
+        LVL4_ADMIN_MENU: [
+            # Добавить админа (предполагая, что это ваш существующий хендлер)
+            CallbackQueryHandler(ask_add_admin_login, pattern="^ask_add_admin_login$"),
+            # Удалить админа (колбэк должен содержать ID: rm_admin_12345)
+            CallbackQueryHandler(process_admin_remove, pattern="^rm_admin_"), # Предполагая, что process_admin_remove существует
+            # Запрос на передачу прав
+            CallbackQueryHandler(ask_transfer_confirm, pattern="^transfer_"), 
+            # Назад
+            CallbackQueryHandler(org_menu, pattern="^back_menu_org$"),
+        ],
+
+        # НОВОЕ СОСТОЯНИЕ: Подтверждение передачи
+        ASK_TRANSFER_CONFIRM: [
+            # Подтверждение
+            CallbackQueryHandler(process_transfer_ownership, pattern="^confirm_transfer_ownership$"),
+            # Отмена и возврат к списку админов
+            CallbackQueryHandler(show_admin_menu, pattern="^back_to_admin_menu$"),
+        ],
+
+        
         LVL4_EVENT_LIST: [
             CallbackQueryHandler(event_menu, pattern="^sel_ev_"),
             CallbackQueryHandler(start_create_event, pattern="^create_event"),
             CallbackQueryHandler(start_delete_event, pattern="^start_delete_event"),
             CallbackQueryHandler(org_menu, pattern="^back_lvl3")
         ],
+        
         EVENT_DELETE_CONFIRM: [
             CallbackQueryHandler(confirm_delete_event, pattern="^del_ev_select_"),
             CallbackQueryHandler(list_events, pattern="^back_lvl4")
@@ -1417,6 +1583,7 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
 
