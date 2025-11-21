@@ -135,9 +135,15 @@ async def add_owner_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         add_user(new_owner_id, None, None)
 
-        await update.message.reply_text(
-            f"✅ Пользователь <code>{new_owner_id}</code> теперь может создавать организации (макс. {ORG_LIMIT_PER_OWNER}).\n\nЕму необходимо использовать команду /admin и кнопку 'Создать Организацию'.",
-            parse_mode='HTML')
+        success = set_user_as_org_creator(new_owner_id, ORG_LIMIT_PER_OWNER)
+
+        if success:
+            await update.message.reply_text(
+                f"✅ Пользователь <code>{new_owner_id}</code> теперь может создавать организации (макс. {ORG_LIMIT_PER_OWNER}).\n\nЕму необходимо использовать команду /admin и кнопку 'Создать Организацию'.",
+                parse_mode='HTML')
+        else:
+             await update.message.reply_text("❌ Ошибка базы данных при назначении прав владельца.")
+
     except ValueError:
         await update.message.reply_text("❌ ID должен быть числом.")
     except Exception as e:
@@ -146,7 +152,6 @@ async def add_owner_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Возврат в главное меню админа
     return await admin_start(update, context)
-
 
 # --- LEVEL 2: ORG LIST ---
 
@@ -1372,3 +1377,4 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
