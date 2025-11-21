@@ -31,6 +31,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+async def main_async():
+    """
+    Настраивает и запускает Telegram-бота через Webhook на Render
+    в рамках единого цикла событий.
+    """
+    if not TOKEN:
+        logger.critical("TELEGRAM_TOKEN не найден. Проверьте переменные окружения.")
+        return
+
+    # Синхронные операции, которые могут быть здесь (например, миграции, 
+    # если они не используют тяжелые блокирующие IO, или лучше вынести их ДО main_async)
+    # create_tables()  <-- Внимание! Лучше вызвать это в синхронном main()
+
+    app = Application.builder().token(TOKEN).build()
+
+
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 # Используем заглушки для импортов, чтобы код был запускаемым
@@ -70,50 +86,58 @@ async def set_webhook_only(app: Application):
         url=f"{RENDER_URL}/{WEBHOOK_PATH}"
     )
 
-# --- ГЛАВНАЯ СИНХРОННАЯ ТОЧКА ВХОДА ---
-def main():
-    if not TOKEN:
-        logger.critical("TELEGRAM_TOKEN не найден.")
-        return
-
-    # 1. СИНХРОННЫЕ ДЕЙСТВИЯ (создание таблиц)
-    create_tables()
-
-    app = Application.builder().token(TOKEN).build()
-
-    # --- Добавление Handler'ов (то же самое) ---
-    app.add_handler(buy_handler)
-    app.add_handler(admin_handler)
-    # ... (другие хендлеры)
-    # ------------------------------------
-
-    # 2. АСИНХРОННОЕ ДЕЙСТВИЕ (установка Webhook)
-    try:
-        # Используем asyncio.run() только для ОДНОГО асинхронного вызова set_webhook
-        asyncio.run(set_webhook_only(app))
-        logger.info("Webhook успешно установлен.")
-    except Exception as e:
-        logger.critical(f"Критическая ошибка при установке Webhook: {e}")
-        return
-
-    # 3. ЗАПУСК WEBHOOK-СЕРВЕРА (СИНХРОННЫЙ, блокирующий вызов)
+# Настройка Webhook
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
     PORT = int(os.environ.get("PORT", 10000))
     WEBHOOK_PATH = "webhook"
 
-    logger.info(f"Запуск Webhook-сервера на порту {PORT}...")
+    if not RENDER_URL:
+        logger.error("Переменная RENDER_EXTERNAL_URL не установлена. Запуск через Polling.")
+        # Для локальной отладки, если нет URL
+        await app.run_polling(drop_pending_updates=True)
+        return
+
+    # 1. Установка Webhook (await в рамках цикла)
+    logger.info(f"Установка Webhook URL: {RENDER_URL}/{WEBHOOK_PATH} на порт {PORT}")
+    await app.bot.set_webhook(
+        url=f"{RENDER_URL}/{WEBHOOK_PATH}"
+    )
+
+    # 2. Запуск Webhook-сервера (await в рамках цикла, блокирует)
+    logger.info("Запуск Webhook-сервера...")
+    # Поскольку мы в async-функции, run_webhook должен быть вызван с await.
+    await app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=WEBHOOK_PATH,
+    )
+    # Примечание: Эта строка кода не будет достигнута, пока Webhook-сервер работает.
+
+
+# --- СИНХРОННАЯ ТОЧКА ВХОДА ---
+if __name__ == '__main__':
+    logger.info("Bot execution started...")
+    
+    # Вызываем синхронные операции перед входом в async-контекст
     try:
-        # run_webhook должен быть вызван синхронно в главном потоке, 
-        # чтобы он начал блокировать выполнение и принимать HTTP-запросы.
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path=WEBHOOK_PATH,
-            # drop_pending_updates=True # опционально
-        )
+        # Ваш синхронный вызов здесь!
+        create_tables() 
     except Exception as e:
-        logger.critical(f"Критическая ошибка запуска Webhook-сервера: {e}")
+        logger.critical(f"Ошибка синхронной инициализации (DB): {e}")
+        sys.exit(1)
+
+    # Запускаем всю асинхронную часть одним вызовом
+    try:
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен вручную.")
+    except Exception as e:
+        # Эта критическая ошибка может быть связана с Render, 
+        # но теперь она должна быть корректно поймана.
+        logger.critical(f"Критическая ошибка запуска приложения: {e}")
 
 
 if __name__ == '__main__':
     logger.info("Bot execution started...")
     main()
+
