@@ -309,8 +309,8 @@ async def org_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_ca
     if role in [ROLE_SUPER_ADMIN, ROLE_ORG_OWNER]:
         keyboard.append([InlineKeyboardButton("👤 Управление Админами", callback_data="add_admin")])
         keyboard.append([InlineKeyboardButton("📢 Рассылка (Org)", callback_data="start_org_broadcast")])
-        keyboard.append([InlineKeyboardButton("🗑️ Удалить организацию", callback_data="start_delete_org")])
         keyboard.append([InlineKeyboardButton("💳 Настроить Карту", callback_data="set_org_card")])
+        keyboard.append([InlineKeyboardButton("🗑️ Удалить организацию", callback_data="start_delete_org")])
         
     keyboard.append([InlineKeyboardButton("🔙 Назад к списку", callback_data="back_lvl2")])
 
@@ -1373,3 +1373,4 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
