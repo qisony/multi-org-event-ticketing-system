@@ -32,6 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def main_async():
+    logger.info("Вход в main_async для инициализации бота.")
     """
     Настраивает и запускает Telegram-бота через Webhook на Render
     в рамках единого цикла событий.
@@ -86,7 +87,7 @@ async def set_webhook_only(app: Application):
         url=f"{RENDER_URL}/{WEBHOOK_PATH}"
     )
 
-# Настройка Webhook
+    # Настройка Webhook
     RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
     PORT = int(os.environ.get("PORT", 10000))
     WEBHOOK_PATH = "webhook"
@@ -136,5 +137,6 @@ if __name__ == '__main__':
         # Эта критическая ошибка может быть связана с Render, 
         # но теперь она должна быть корректно поймана.
         logger.critical(f"Критическая ошибка запуска приложения: {e}")
+
 
 
