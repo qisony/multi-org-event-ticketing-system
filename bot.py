@@ -1,5 +1,5 @@
 # bot.py
-
+import asyncio
 import os
 import logging
 import sys
@@ -36,6 +36,28 @@ load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 
+async def set_up_webhook(app: Application):
+    """
+    Эта асинхронная функция настраивает и запускает Webhook.
+    """
+    # 1. Ваш URL (замените на реальный адрес Render)
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://your-app-name.onrender.com")
+    WEBHOOK_PATH = "webhook"
+    
+    # 2. Установите Webhook на серверах Telegram (используется await)
+    print(f"Setting Webhook URL to: {RENDER_URL}/{WEBHOOK_PATH}")
+    await app.bot.set_webhook(
+        url=f"{RENDER_URL}/{WEBHOOK_PATH}"
+    )
+    
+    # 3. Запустите Webhook-сервер на Render (на порту 10000)
+    await app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000)), # Читаем порт из переменных окружения Render
+        url_path=WEBHOOK_PATH,
+        webhook_url=f"{RENDER_URL}/{WEBHOOK_PATH}"
+    )
+
 def main():
     if not TOKEN:
         logger.critical("TELEGRAM_TOKEN не найден.")
@@ -70,9 +92,24 @@ def main():
         url_path="/api/webhook.py" # Путь, который Telegram будет использовать
     )
 
+    try:
+        # Поскольку run_webhook — это блокирующий вызов,
+        # мы вызываем set_webhook через asyncio.run() до него.
+        asyncio.run(app.bot.set_webhook(url=f"{os.environ['RENDER_EXTERNAL_URL']}/webhook"))
+        
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.environ.get("PORT", 10000)),
+            url_path="webhook",
+        )
+    except Exception as e:
+        print(f"Error during execution: {e}")
+        # Это может помочь, если вы хотите убедиться, что Webhook сброшен при сбое
+        # asyncio.run(app.bot.delete_webhook())
 
 if __name__ == '__main__':
 
     main()
+
 
 
