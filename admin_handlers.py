@@ -1314,6 +1314,83 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return LVL4_ADMIN_MENU
 
 
+# admin_handlers.py
+
+async def process_admin_add_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Обрабатывает введенный логин/ID, находит пользователя и назначает его админом.
+    """
+    user_input = update.message.text.strip()
+    org_id = context.user_data.get('selected_org_id')
+    current_owner_id = update.effective_user.id
+    
+    # 1. Находим chat_id по логину или ID
+    
+    # Предполагаем, что у вас есть функция, которая находит chat_id:
+    user_to_add_id = find_user_id_by_login_or_id(user_input) 
+    
+    if not user_to_add_id:
+        text = "❌ Пользователь с таким логином/ID не найден в системе. Попробуйте снова."
+        await update.message.reply_text(text)
+        return INPUT_ADD_ADMIN_LOGIN
+    
+    if user_to_add_id == current_owner_id:
+        text = "❌ Вы не можете добавить самого себя."
+        await update.message.reply_text(text)
+        return INPUT_ADD_ADMIN_LOGIN
+    
+    # 2. Добавляем в базу данных
+    # Предполагаем, что у вас есть функция, которая добавляет/обновляет админа:
+    success = add_admin_to_org(user_to_add_id, org_id) 
+
+    if success:
+        text = f"✅ Пользователь с ID `{user_to_add_id}` успешно назначен администратором организации (роль: org_admin)."
+    else:
+        text = "❌ Ошибка при добавлении администратора. Возможно, он уже является админом."
+
+    await update.message.reply_text(text, parse_mode='Markdown')
+    
+    # После добавления возвращаемся в список администраторов
+    # Так как это MessageHandler, нужно вызвать show_admin_menu через callback (edit_message)
+    # или просто вернуться в предыдущее состояние, чтобы пользователь мог нажать "назад".
+    # Для простоты вернемся в меню организации, откуда можно зайти обратно.
+    
+    # Возвращаемся в меню организации, чтобы избежать сложностей с MessageHandler + CallbackMenu
+    return await org_menu(update, context)
+
+
+# admin_handlers.py
+
+async def process_admin_remove(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Удаляет администратора из организации.
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    # Извлекаем ID админа из callback_data: rm_admin_12345
+    admin_to_remove_id = int(query.data.split('_')[2]) 
+    org_id = context.user_data.get('selected_org_id')
+    
+    # Проверка, не пытается ли владелец удалить самого себя
+    if admin_to_remove_id == update.effective_user.id:
+        await query.edit_message_text("❌ Вы не можете удалить владельца организации (самого себя). Используйте функцию 'Передать права'.")
+        return await show_admin_menu(update, context) 
+        
+    # Предполагаем, что у вас есть функция для удаления:
+    success = remove_admin_from_org(admin_to_remove_id, org_id)
+
+    if success:
+        text = f"✅ Администратор (ID: {admin_to_remove_id}) успешно удален."
+    else:
+        text = "❌ Ошибка при удалении администратора."
+
+    await query.edit_message_text(text, 
+                                  reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data='back_to_admin_menu')]]))
+    
+    return LVL4_ADMIN_MENU
+
+
 async def ask_transfer_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Запрос подтверждения передачи прав.
@@ -1601,6 +1678,7 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
 
