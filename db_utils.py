@@ -949,3 +949,99 @@ def get_user_org_count(chat_id: int) -> int:
         conn.close()
 
 
+
+# db_utils.py
+
+# ... (существующие импорты и функции) ...
+
+def get_org_admins_list(org_id: int) -> list[dict]:
+    """
+    Получает список всех администраторов организации, включая владельца.
+    Возвращает список словарей: [{'chat_id': 123, 'username': 'user1', 'role': 'org_owner'}, ...]
+    """
+    conn = connect_db()
+    if not conn: return []
+    cursor = conn.cursor()
+    admins_list = []
+    
+    try:
+        # Получаем данные о владельце и администраторах из связанных таблиц
+        # (Предполагается, что владелец также присутствует в org_admins с ролью 'org_owner')
+        cursor.execute("""
+            SELECT 
+                oa.chat_id, 
+                u.username, 
+                oa.role,
+                CASE 
+                    WHEN o.owner_id = oa.chat_id THEN 1 
+                    ELSE 0 
+                END AS is_owner
+            FROM org_admins oa
+            JOIN users u ON oa.chat_id = u.chat_id
+            JOIN organizations o ON oa.org_id = o.id
+            WHERE oa.org_id = %s
+            ORDER BY is_owner DESC, u.username ASC
+        """, (org_id,))
+
+        rows = cursor.fetchall()
+        
+        for chat_id, username, role, is_owner in rows:
+            admins_list.append({
+                'chat_id': chat_id,
+                # Используем username, если есть, иначе отображаем ID
+                'username': username if username else f"ID:{chat_id}",
+                'role': role
+            })
+            
+        return admins_list
+        
+    except Exception as e:
+        logging.error(f"❌ Ошибка при получении списка админов организации: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+# db_utils.py
+
+# ... (существующие функции) ...
+
+def transfer_org_ownership(org_id: int, new_owner_chat_id: int, old_owner_chat_id: int) -> bool:
+    """
+    Передает права владельца организации новому пользователю.
+    Обновляет organizations.owner_id, а также роли в org_admins.
+    """
+    conn = connect_db()
+    if not conn: return False
+    cursor = conn.cursor()
+    
+    try:
+        # 1. Обновляем таблицу organizations: устанавливаем нового владельца
+        cursor.execute("""
+            UPDATE organizations SET owner_id = %s, updated_at = NOW()
+            WHERE id = %s
+        """, (new_owner_chat_id, org_id))
+        
+        # 2. Обновляем роль нового владельца в org_admins: устанавливаем 'org_owner'
+        cursor.execute("""
+            UPDATE org_admins SET role = 'org_owner', updated_at = NOW()
+            WHERE org_id = %s AND chat_id = %s
+        """, (org_id, new_owner_chat_id))
+
+        # 3. Обновляем роль старого владельца в org_admins: понижаем до 'org_admin'
+        cursor.execute("""
+            UPDATE org_admins SET role = 'org_admin', updated_at = NOW()
+            WHERE org_id = %s AND chat_id = %s
+        """, (org_owner_id, old_owner_chat_id))
+        
+        conn.commit()
+        return True
+    
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"❌ Ошибка при передаче прав владельца: {e}")
+        return False
+    
+    finally:
+        conn.close()
+
