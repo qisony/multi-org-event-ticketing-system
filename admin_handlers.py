@@ -75,20 +75,36 @@ ORG_LIMIT_PER_OWNER = 2
 
 # --- LEVEL 1: SUPER ADMIN MAIN MENU ---
 
+# admin_handlers.py
+
+# ... (Остальные импорты и константы, включая SUPER_ADMIN_ID) ...
+
 async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     is_super = (user_id == SUPER_ADMIN_ID)
+    
+    # Роли из таблицы org_admins (Условие 2: Администратор существующей Org)
     roles = get_admin_roles(user_id)
+    
+    # НОВОЕ: Проверка права на создание организаций (Условие 3: Владелец)
+    org_creator_count = get_user_org_count(user_id) 
 
-    if not is_super and not roles:
+    # --- ИСПРАВЛЕННАЯ ПРОВЕРКА ДОСТУПА ---
+    # Доступ разрешен, если: 
+    # 1) Супер-админ ИЛИ 
+    # 2) Есть роли в org_admins ИЛИ 
+    # 3) Есть право на создание (org_creator_count > 0)
+    if not is_super and not roles and org_creator_count == 0:
+        # Если ни одно из трех условий не выполнено
         msg_obj = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
         await msg_obj("❌ У вас нет прав администратора.")
         return ConversationHandler.END
 
     context.user_data.update({'roles': roles, 'is_super': is_super})
 
-    keyboard = []
-
+    # --- ЛОГИКА МЕНЮ ---
+    
+    # 1. Супер-админ видит полное меню (LVL1_MAIN)
     if is_super:
         keyboard = [
             [InlineKeyboardButton("👥 Назначить Владельца", callback_data="add_org_owner")],
@@ -98,19 +114,23 @@ async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             [InlineKeyboardButton("🚪 Выход", callback_data="admin_exit")]
         ]
         text = "👑 <b>Панель Супер-Администратора</b>\nВыберите действие:"
+        
+        msg_obj = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
 
-    elif roles:
+        if update.callback_query:
+            await update.callback_query.answer()
+            await msg_obj(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        elif update.message:
+            await msg_obj(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+        return LVL1_MAIN
+
+    # 2. Обычный владелец/админ (включая НОВЫХ ВЛАДЕЛЬЦЕВ) отправляется в список организаций (LVL2_ORG_LIST)
+    # Функция list_orgs() сама определит, какие кнопки показывать.
+    elif roles or org_creator_count > 0:
         return await list_orgs(update, context, direct_call=True)
 
-    msg_obj = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
-
-    if update.callback_query:
-        await update.callback_query.answer()
-        await msg_obj(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-    elif update.message:
-        await msg_obj(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-
-    return LVL1_MAIN
+    # ... (Остальной код, если есть) ...
 
 
 # --- SUPER ADMIN: ADD ORG OWNER (ОБНОВЛЕНО) ---
@@ -1377,5 +1397,6 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
