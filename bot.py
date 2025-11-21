@@ -124,10 +124,11 @@ if __name__ == '__main__':
         create_tables() 
     except Exception as e:
         logger.critical(f"Ошибка синхронной инициализации (DB): {e}")
-        sys.exit(1)
-
+        # sys.exit(1) # Опционально, если вы хотите, чтобы приложение падало при ошибке DB
+        
     # Запускаем всю асинхронную часть одним вызовом
     try:
+        # ПРАВИЛЬНЫЙ ВЫЗОВ: запускаем асинхронную функцию main_async
         asyncio.run(main_async())
     except KeyboardInterrupt:
         logger.info("Бот остановлен вручную.")
@@ -135,10 +136,5 @@ if __name__ == '__main__':
         # Эта критическая ошибка может быть связана с Render, 
         # но теперь она должна быть корректно поймана.
         logger.critical(f"Критическая ошибка запуска приложения: {e}")
-
-
-if __name__ == '__main__':
-    logger.info("Bot execution started...")
-    asyncio.run(main_async())
 
 
