@@ -335,9 +335,19 @@ async def org_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_ca
         [InlineKeyboardButton("✅ Проверить билет (Org)", callback_data="check_ticket_org")]
     ]
 
+
+    if user_id == SUPER_ADMIN_ID:
+        role = ROLE_SUPER_ADMIN
+    else:
+        # 2. Если не Супер-админ, получаем его роль в выбранной организации
+        # (get_user_role_in_org вернет 'org_owner', 'org_admin', или None)
+        role = get_user_role_in_org(user_id, org_id)
+
+    
     if role in [ROLE_SUPER_ADMIN, ROLE_ORG_OWNER]:
         owner_buttons = [
-            [InlineKeyboardButton("👥 Управление админами", callback_data='manage_admins')], # Убедитесь, что здесь 'manage_admins'        keyboard.append([InlineKeyboardButton("📢 Рассылка (Org)", callback_data="start_org_broadcast")])
+            [InlineKeyboardButton("👥 Управление админами", callback_data='manage_admins')], # Убедитесь, что здесь 'manage_admins'        
+            [InlineKeyboardButton("📢 Рассылка (Org)", callback_data="start_org_broadcast")]
             [InlineKeyboardButton("💳 Настроить Карту", callback_data="set_org_card")],
             [InlineKeyboardButton("🗑️ Удалить организацию", callback_data="start_delete_org")]
         ]
@@ -1678,6 +1688,7 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
 
