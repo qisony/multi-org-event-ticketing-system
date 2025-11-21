@@ -51,72 +51,69 @@ except ImportError as e:
     def cancel_global(): pass
 
 
-# --- АСИНХРОННАЯ ГЛАВНАЯ ФУНКЦИЯ ДЛЯ WEBHOOK ---
-async def main_async():
+# ... (начало файла bot.py)
+
+# --- АСИНХРОННАЯ ФУНКЦИЯ ДЛЯ УСТАНОВКИ WEBHOOK ---
+async def set_webhook_only(app: Application):
     """
-    Настраивает и запускает Telegram-бота через Webhook на Render.
+    Выполняет только асинхронный вызов set_webhook.
     """
-    if not TOKEN:
-        logger.critical("TELEGRAM_TOKEN не найден. Проверьте переменные окружения.")
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+    WEBHOOK_PATH = "webhook" 
+    
+    if not RENDER_URL:
+        logger.error("Переменная RENDER_EXTERNAL_URL не установлена.")
         return
 
-    # Запуск синхронных задач (создание таблиц)
+    logger.info(f"Установка Webhook URL: {RENDER_URL}/{WEBHOOK_PATH}")
+    await app.bot.set_webhook(
+        url=f"{RENDER_URL}/{WEBHOOK_PATH}"
+    )
+
+# --- ГЛАВНАЯ СИНХРОННАЯ ТОЧКА ВХОДА ---
+def main():
+    if not TOKEN:
+        logger.critical("TELEGRAM_TOKEN не найден.")
+        return
+
+    # 1. СИНХРОННЫЕ ДЕЙСТВИЯ (создание таблиц)
     create_tables()
 
     app = Application.builder().token(TOKEN).build()
 
-    # --- Добавление Handler'ов ---
+    # --- Добавление Handler'ов (то же самое) ---
     app.add_handler(buy_handler)
     app.add_handler(admin_handler)
-    app.add_handler(CommandHandler("stop_bot", stop_bot_handler))
+    # ... (другие хендлеры)
+    # ------------------------------------
 
-    app.add_handler(CallbackQueryHandler(
-        issue_ticket_from_admin_notification,
-        pattern=r'^(adm_approve_|adm_reject_)[a-fA-F0-9]+$'
-    ))
-    app.add_handler(CommandHandler("cancel", cancel_global))
-    # -----------------------------
-
-    # Настройка Webhook
-    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
-    PORT = int(os.environ.get("PORT", 10000))
-    WEBHOOK_PATH = "webhook" # Используем простой и понятный путь
-
-    if not RENDER_URL:
-        # Если RENDER_EXTERNAL_URL не установлен (например, локальный запуск без него), 
-        # лучше вернуться к Polling или вывести ошибку.
-        logger.error("Переменная RENDER_EXTERNAL_URL не установлена. Запуск через Polling (для локальной отладки).")
-        await app.run_polling(drop_pending_updates=True)
+    # 2. АСИНХРОННОЕ ДЕЙСТВИЕ (установка Webhook)
+    try:
+        # Используем asyncio.run() только для ОДНОГО асинхронного вызова set_webhook
+        asyncio.run(set_webhook_only(app))
+        logger.info("Webhook успешно установлен.")
+    except Exception as e:
+        logger.critical(f"Критическая ошибка при установке Webhook: {e}")
         return
 
-    # 1. Установите Webhook на серверах Telegram (Требует await)
-    logger.info(f"Установка Webhook URL: {RENDER_URL}/{WEBHOOK_PATH} на порт {PORT}")
+    # 3. ЗАПУСК WEBHOOK-СЕРВЕРА (СИНХРОННЫЙ, блокирующий вызов)
+    PORT = int(os.environ.get("PORT", 10000))
+    WEBHOOK_PATH = "webhook"
+
+    logger.info(f"Запуск Webhook-сервера на порту {PORT}...")
     try:
-        await app.bot.set_webhook(
-            url=f"{RENDER_URL}/{WEBHOOK_PATH}"
+        # run_webhook должен быть вызван синхронно в главном потоке, 
+        # чтобы он начал блокировать выполнение и принимать HTTP-запросы.
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=WEBHOOK_PATH,
+            # drop_pending_updates=True # опционально
         )
     except Exception as e:
-        logger.critical(f"Не удалось установить Webhook: {e}")
-        return
-
-    # 2. Запустите Webhook-сервер (Требует await)
-    logger.info("Запуск Webhook-сервера...")
-    # listen="0.0.0.0" позволяет слушать все внешние IP-адреса, что нужно на Render
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=WEBHOOK_PATH,
-    )
+        logger.critical(f"Критическая ошибка запуска Webhook-сервера: {e}")
 
 
-# --- СИНХРОННАЯ ТОЧКА ВХОДА ---
 if __name__ == '__main__':
     logger.info("Bot execution started...")
-    
-    # Запускаем главную асинхронную функцию
-    try:
-        asyncio.run(main_async())
-    except KeyboardInterrupt:
-        logger.info("Бот остановлен вручную (KeyboardInterrupt).")
-    except Exception as e:
-        logger.critical(f"Критическая ошибка запуска приложения: {e}")
+    main()
