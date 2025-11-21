@@ -858,3 +858,32 @@ def process_refund_ticket(ticket_id: str) -> tuple[bool, str, int, int]:
         cursor.close()
 
         conn.close()
+
+def set_user_as_org_creator(chat_id: int, limit: int) -> bool:
+    """Устанавливает пользователю возможность создавать организации, обновляя его лимит."""
+    conn = connect_db()
+    if conn is None:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Обновляем поле org_owned_count в таблице users. 
+        # Установка его в значение лимита сигнализирует системе, 
+        # что пользователь имеет право создавать организации.
+        cursor.execute("""
+            UPDATE users SET org_owned_count = %s
+            WHERE chat_id = %s
+        """, (limit, chat_id))
+        
+        conn.commit()
+        return True
+    
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"❌ Ошибка при назначении прав владельца: {e}")
+        return False
+    
+    finally:
+        conn.close()
+
