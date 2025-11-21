@@ -8,7 +8,7 @@ from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 from db_utils import create_tables, add_bank_card_column, migrate_refund_system
 from user_handlers import buy_handler, issue_ticket_from_admin_notification
-from admin_handlers import admin_handler
+from admin_handlers import admin_handler, stop_bot_handler
 from utils import cancel_global
 
 # --- Настройка логирования ---
@@ -48,6 +48,7 @@ def main():
     # Хендлеры
     app.add_handler(buy_handler)
     app.add_handler(admin_handler)
+    app.add_handler(CommandHandler("stop_bot", stop_bot_handler))
 
     # Глобальный callback для админов (подтверждение оплаты)
     app.add_handler(CallbackQueryHandler(
@@ -62,4 +63,5 @@ def main():
 
 
 if __name__ == '__main__':
+
     main()
