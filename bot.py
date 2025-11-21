@@ -4,8 +4,7 @@ import os
 import logging
 import sys
 from dotenv import load_dotenv
-from telegram import Update, BotCommand
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from db_utils import create_tables, add_bank_card_column, migrate_refund_system
 from user_handlers import buy_handler, issue_ticket_from_admin_notification
 from admin_handlers import admin_handler, stop_bot_handler
@@ -34,82 +33,90 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
+# Используем заглушки для импортов, чтобы код был запускаемым
+# В реальном коде вам нужно убедиться, что они импортируются корректно
+try:
+    from db_utils import create_tables
+    from user_handlers import buy_handler, issue_ticket_from_admin_notification
+    from admin_handlers import admin_handler, stop_bot_handler
+    from utils import cancel_global
+except ImportError as e:
+    logger.warning(f"Ошибка импорта локальных модулей (это нормально, если вы просто тестируете): {e}")
+    # Используем заглушки, чтобы код не падал, но в вашем случае они должны быть реальными
+    def create_tables(): pass
+    def buy_handler(): pass
+    def admin_handler(): pass
+    def stop_bot_handler(): pass
+    def issue_ticket_from_admin_notification(): pass
+    def cancel_global(): pass
 
 
-async def set_up_webhook(app: Application):
+# --- АСИНХРОННАЯ ГЛАВНАЯ ФУНКЦИЯ ДЛЯ WEBHOOK ---
+async def main_async():
     """
-    Эта асинхронная функция настраивает и запускает Webhook.
+    Настраивает и запускает Telegram-бота через Webhook на Render.
     """
-    # 1. Ваш URL (замените на реальный адрес Render)
-    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://your-app-name.onrender.com")
-    WEBHOOK_PATH = "webhook"
-    
-    # 2. Установите Webhook на серверах Telegram (используется await)
-    print(f"Setting Webhook URL to: {RENDER_URL}/{WEBHOOK_PATH}")
-    await app.bot.set_webhook(
-        url=f"{RENDER_URL}/{WEBHOOK_PATH}"
-    )
-    
-    # 3. Запустите Webhook-сервер на Render (на порту 10000)
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)), # Читаем порт из переменных окружения Render
-        url_path=WEBHOOK_PATH,
-        webhook_url=f"{RENDER_URL}/{WEBHOOK_PATH}"
-    )
-
-def main():
     if not TOKEN:
-        logger.critical("TELEGRAM_TOKEN не найден.")
+        logger.critical("TELEGRAM_TOKEN не найден. Проверьте переменные окружения.")
         return
 
+    # Запуск синхронных задач (создание таблиц)
     create_tables()
 
     app = Application.builder().token(TOKEN).build()
 
-    # Хендлеры
+    # --- Добавление Handler'ов ---
     app.add_handler(buy_handler)
     app.add_handler(admin_handler)
     app.add_handler(CommandHandler("stop_bot", stop_bot_handler))
 
-    # Глобальный callback для админов (подтверждение оплаты)
     app.add_handler(CallbackQueryHandler(
         issue_ticket_from_admin_notification,
         pattern=r'^(adm_approve_|adm_reject_)[a-fA-F0-9]+$'
     ))
-
     app.add_handler(CommandHandler("cancel", cancel_global))
+    # -----------------------------
 
-    logger.info("Bot started...")
-    # 1. Установите URL для Telegram
-    await app.bot.set_webhook(url="ВАШ_URL_RENDER/webhook")
+    # Настройка Webhook
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+    PORT = int(os.environ.get("PORT", 10000))
+    WEBHOOK_PATH = "webhook" # Используем простой и понятный путь
 
-    # 2. Запустите Webhook-сервер
-    # Порт 10000 является стандартом для Render
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=10000, # Используйте порт, который Render назначил вашему сервису (обычно 10000)
-        url_path="/api/webhook.py" # Путь, который Telegram будет использовать
-    )
+    if not RENDER_URL:
+        # Если RENDER_EXTERNAL_URL не установлен (например, локальный запуск без него), 
+        # лучше вернуться к Polling или вывести ошибку.
+        logger.error("Переменная RENDER_EXTERNAL_URL не установлена. Запуск через Polling (для локальной отладки).")
+        await app.run_polling(drop_pending_updates=True)
+        return
 
+    # 1. Установите Webhook на серверах Telegram (Требует await)
+    logger.info(f"Установка Webhook URL: {RENDER_URL}/{WEBHOOK_PATH} на порт {PORT}")
     try:
-        # Поскольку run_webhook — это блокирующий вызов,
-        # мы вызываем set_webhook через asyncio.run() до него.
-        asyncio.run(app.bot.set_webhook(url=f"{os.environ['RENDER_EXTERNAL_URL']}/webhook"))
-        
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=int(os.environ.get("PORT", 10000)),
-            url_path="webhook",
+        await app.bot.set_webhook(
+            url=f"{RENDER_URL}/{WEBHOOK_PATH}"
         )
     except Exception as e:
-        print(f"Error during execution: {e}")
-        # Это может помочь, если вы хотите убедиться, что Webhook сброшен при сбое
-        # asyncio.run(app.bot.delete_webhook())
+        logger.critical(f"Не удалось установить Webhook: {e}")
+        return
 
+    # 2. Запустите Webhook-сервер (Требует await)
+    logger.info("Запуск Webhook-сервера...")
+    # listen="0.0.0.0" позволяет слушать все внешние IP-адреса, что нужно на Render
+    await app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=WEBHOOK_PATH,
+    )
+
+
+# --- СИНХРОННАЯ ТОЧКА ВХОДА ---
 if __name__ == '__main__':
-
-    main()
-
-
-
+    logger.info("Bot execution started...")
+    
+    # Запускаем главную асинхронную функцию
+    try:
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен вручную (KeyboardInterrupt).")
+    except Exception as e:
+        logger.critical(f"Критическая ошибка запуска приложения: {e}")
