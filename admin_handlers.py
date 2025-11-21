@@ -46,6 +46,7 @@ ORG_LIMIT_PER_OWNER = 2
     INPUT_NEW_PROD_NAME,
     INPUT_NEW_PROD_PRICE,
     INPUT_NEW_PROD_LIMIT,
+    INPUT_PROD_REFUND_STATUS,
     INPUT_CHECK_TICKET,
     INPUT_ORG_CARD,  # Для карты
 
@@ -69,7 +70,7 @@ ORG_LIMIT_PER_OWNER = 2
 
     # Сброс БД
     DB_RESET_CONFIRM
-) = range(27)  # <-- Убедитесь, что число в range() соответствует общему количеству состояний.
+) = range(28)  # <-- Убедитесь, что число в range() соответствует общему количеству состояний.
 
 
 # --- LEVEL 1: SUPER ADMIN MAIN MENU ---
@@ -309,9 +310,8 @@ async def org_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_ca
     if role in [ROLE_SUPER_ADMIN, ROLE_ORG_OWNER]:
         keyboard.append([InlineKeyboardButton("👤 Управление Админами", callback_data="add_admin")])
         keyboard.append([InlineKeyboardButton("📢 Рассылка (Org)", callback_data="start_org_broadcast")])
-        keyboard.append([InlineKeyboardButton("💳 Настроить Карту", callback_data="set_org_card")])
-        keyboard.append([InlineKeyboardButton("🗑️ Удалить организацию", callback_data="start_delete_org")])
-        
+
+    keyboard.append([InlineKeyboardButton("💳 Настроить Карту", callback_data="set_org_card")])
     keyboard.append([InlineKeyboardButton("🔙 Назад к списку", callback_data="back_lvl2")])
 
     text = f"⚙️ <b>Управление организацией:</b> <code>{safe_org_name}</code>\nВаша роль: <b>{role}</b>"
@@ -610,35 +610,76 @@ async def input_prod_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return INPUT_NEW_PROD_PRICE
 
 
+# admin_handlers.py
+
 async def input_prod_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         limit = int(update.message.text)
-        if limit < 0:
-            raise ValueError
+        if limit < 0: raise ValueError
 
-        ev_id = context.user_data['curr_ev_id']
-        name = context.user_data['new_prod_name']
-        price = context.user_data['new_prod_price']
+        # --- ВАЖНО: СОХРАНЯЕМ ЛИМИТ В ПАМЯТЬ ---
+        context.user_data['new_prod_limit'] = limit
+        # ---------------------------------------
 
-        prod_id = create_product(ev_id, name, price, limit)
+        # Теперь спрашиваем про возвратность
+        keyboard = [
+            [InlineKeyboardButton("✅ Да, возвратный", callback_data="refund_yes")],
+            [InlineKeyboardButton("❌ Нет, невозвратный", callback_data="refund_no")],
+            [InlineKeyboardButton("🔙 Отмена", callback_data="back_menu_ev")]
+        ]
 
-        if prod_id:
-            limit_text = 'Безлимит' if limit == 0 else str(limit)
-            await update.message.reply_text(
-                f"✅ Тариф <b>{escape_html(name)}</b> ({price}р, лимит: {limit_text}) создан.", parse_mode='HTML')
-        else:
-            await update.message.reply_text("❌ Ошибка при сохранении тарифа.")
+        await update.message.reply_text(
+            f"Лимит установлен: <b>{limit if limit > 0 else 'Безлимит'}</b>.\n\n"
+            "Теперь выберите: <b>Можно ли вернуть этот билет?</b>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
+        )
+        return INPUT_PROD_REFUND_STATUS
 
     except ValueError:
-        await update.message.reply_text(
-            "❌ Количество должно быть целым числом (0 или больше). Повторите ввод количества:")
+        await update.message.reply_text("❌ Количество должно быть целым числом (0 или больше). Повторите ввод:")
         return INPUT_NEW_PROD_LIMIT
-    except Exception as e:
-        logging.error(f"Create product error: {e}")
-        await update.message.reply_text("❌ Непредвиденная ошибка при создании тарифа.")
 
-    # Возврат в меню ивента
-    return await event_menu(update, context)
+
+# admin_handlers.py
+
+async def save_new_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    # Определяем возвратность из нажатой кнопки
+    is_refundable = (query.data == "refund_yes")
+
+    # Достаем ВСЕ данные из памяти
+    ev_id = context.user_data['curr_ev_id']
+    name = context.user_data['new_prod_name']
+    price = context.user_data['new_prod_price']
+
+    # --- ДОСТАЕМ ЛИМИТ ---
+    limit = context.user_data['new_prod_limit']
+    # ---------------------
+
+    # Сохраняем в БД (функция create_product должна принимать 5 аргументов!)
+    # Убедитесь, что вы обновили db_utils.py из прошлого ответа
+    prod_id = create_product(ev_id, name, price, limit, is_refundable)
+
+    refund_text = "✅ Возвратный" if is_refundable else "❌ Невозвратный"
+    limit_text = "Безлимит" if limit == 0 else str(limit)
+
+    if prod_id:
+        await query.edit_message_text(
+            f"✅ Тариф создан!\n\n"
+            f"🏷 <b>{escape_html(name)}</b>\n"
+            f"💰 Цена: {price} руб.\n"
+            f"🔢 Лимит: {limit_text}\n"
+            f"🔄 Тип: {refund_text}",
+            parse_mode='HTML'
+        )
+    else:
+        await query.edit_message_text("❌ Ошибка при сохранении тарифа.")
+
+    return await event_menu(update, context)  # Возврат в меню ивента
+
 
 
 # --- НОВОЕ: УДАЛЕНИЕ МЕРОПРИЯТИЯ (остается без изменений) ---
@@ -1140,51 +1181,6 @@ async def confirm_delete_org(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return await list_orgs(update, context, direct_call=True)
 
 
-# admin_handlers.py (Функции START и CONFIRM)
-
-# --- DELETE ORGANIZATION ---
-async def start_delete_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Запрашивает подтверждение перед удалением организации."""
-    query = update.callback_query
-    await query.answer()
-    org_id = context.user_data['curr_org_id']
-    # Предполагается, что get_org_name определена в db_utils
-    from db_utils import get_org_name 
-    org_name = get_org_name(org_id) 
-
-    keyboard = [
-        [InlineKeyboardButton("🗑️ ДА, УДАЛИТЬ ВСЁ", callback_data="confirm_del_org")],
-        [InlineKeyboardButton("🔙 НЕТ, ОТМЕНА", callback_data="back_menu_org")]
-    ]
-    
-    await query.edit_message_text(
-        f"🔥 <b>УДАЛЕНИЕ ОРГАНИЗАЦИИ '{escape_html(org_name)}'</b> 🔥\n\n"
-        f"Вы собираетесь удалить организацию и <b>ВСЕ</b> связанные мероприятия, билеты и настройки.\n"
-        f"<b>Это действие необратимо!</b>\n\n"
-        f"Вы уверены?",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML'
-    )
-    # ORG_DELETE_CONFIRM - это состояние, в котором мы ждем нажатия "ДА" или "НЕТ"
-    return ORG_DELETE_CONFIRM 
-
-async def confirm_delete_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Выполняет удаление организации из БД."""
-    query = update.callback_query
-    await query.answer()
-    org_id = context.user_data['curr_org_id']
-    
-    # Предполагается, что delete_organization_db(org_id) определена в db_utils
-    from db_utils import delete_organization_db
-    if delete_organization_db(org_id):
-        await query.edit_message_text("✅ Организация успешно удалена.", parse_mode='HTML')
-    else:
-        await query.edit_message_text("❌ Ошибка при удалении организации.", parse_mode='HTML')
-        
-    # Возврат к списку организаций (LVL2_ORG_LIST)
-    return await list_orgs(update, context, direct_call=True)
-
-
 # --- MAIN HANDLER (ОБНОВЛЕНО) ---
 
 admin_handler = ConversationHandler(
@@ -1223,17 +1219,9 @@ admin_handler = ConversationHandler(
             CallbackQueryHandler(ask_admin_id, pattern="^add_admin"),
             CallbackQueryHandler(start_check_ticket, pattern="^check_ticket_org"),
             CallbackQueryHandler(select_broadcast_audience, pattern="^start_org_broadcast$"),
-            CallbackQueryHandler(start_delete_org, pattern="^start_delete_org$"),
             CallbackQueryHandler(ask_org_card, pattern="^set_org_card$"),
             CallbackQueryHandler(list_orgs, pattern="^back_lvl2"),
             CallbackQueryHandler(org_menu, pattern="^back_menu_org")
-        ],
-
-        ORG_DELETE_CONFIRM: [
-            # 2. С кнопки "ДА, УДАЛИТЬ ВСЁ" (confirm_delete_org)
-            CallbackQueryHandler(confirm_delete_org, pattern="^confirm_del_org$"),
-            # 3. С кнопки "НЕТ, ОТМЕНА" (возвращаемся в org_menu)
-            CallbackQueryHandler(org_menu, pattern="^back_menu_org$") 
         ],
 
         INPUT_ADD_ADMIN_LOGIN: [ # LOGIN
@@ -1323,10 +1311,20 @@ admin_handler = ConversationHandler(
             CallbackQueryHandler(event_menu, pattern="^back_menu_ev")
         ],
         # ДОБАВЛЕН CallbackQueryHandler для отмены ввода
+        # admin_handlers.py (в конце файла)
+
+        # ...
         INPUT_NEW_PROD_LIMIT: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, input_prod_limit),
             CallbackQueryHandler(event_menu, pattern="^back_menu_ev")
         ],
+
+        # НОВОЕ СОСТОЯНИЕ
+        INPUT_PROD_REFUND_STATUS: [
+            CallbackQueryHandler(save_new_product, pattern="^refund_"),
+            CallbackQueryHandler(event_menu, pattern="^back_menu_ev")
+        ],
+        # ...
 
         # BROADCAST STATES (ОБНОВЛЕНО)
         BROADCAST_AUDIENCE: [
@@ -1371,6 +1369,4 @@ admin_handler = ConversationHandler(
         ],
     },
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
-
 )
-

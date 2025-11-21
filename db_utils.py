@@ -401,16 +401,15 @@ def add_org_admin(org_id, user_id, role):
         conn.close()
 
 
-def create_product(event_id: int, name: str, price: int, quantity_limit: int):
+def create_product(event_id: int, name: str, price: int, quantity_limit: int, is_refundable: bool):
     conn = connect_db()
     if not conn: return None
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            INSERT INTO products (event_id, name, price, quantity_limit) 
-            VALUES (%s, %s, %s, %s) 
-            RETURNING id
-        """, (event_id, name, price, quantity_limit))
+            IINSERT INTO products (event_id, name, price, quantity_limit, is_refundable) 
+        VALUES (%s, %s, %s, %s, %s) ...
+    """, (event_id, name, price, quantity_limit, is_refundable))
         prod_id = cursor.fetchone()[0]
         conn.commit()
         return prod_id
@@ -730,6 +729,118 @@ def get_org_card(org_id: int) -> str | None:
     except Exception as e:
         logging.error(f"Get Org Card Error: {e}")
         return None
+    finally:
+        cursor.close()
+        conn.close()
+
+def migrate_refund_system():
+    """Добавляет колонки для системы возвратов."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        # Флаг возвратности для тарифа
+        cursor.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_refundable BOOLEAN DEFAULT FALSE;")
+        # Флаг, что билет был возвращен
+        cursor.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS is_refunded BOOLEAN DEFAULT FALSE;")
+        conn.commit()
+        logging.info("DB Migrated: Refund system ready.")
+    except Exception as e:
+        logging.error(f"Migration Error: {e}")
+    finally:
+        conn.close()
+
+# Обновленная сигнатура и запрос
+def create_product(event_id: int, name: str, price: int, quantity_limit: int, is_refundable: bool):
+    conn = connect_db()
+    if not conn: return None
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO products (event_id, name, price, quantity_limit, is_refundable) 
+            VALUES (%s, %s, %s, %s, %s) 
+            RETURNING id
+        """, (event_id, name, price, quantity_limit, is_refundable))
+        prod_id = cursor.fetchone()[0]
+        conn.commit()
+        return prod_id
+    except Exception as e:
+        logging.error(f"Create product error: {e}")
+        conn.rollback()
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def get_user_tickets(chat_id: int):
+    """Получает активные билеты пользователя."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT t.ticket_id, e.name, p.name, t.final_price, e.date_str, p.is_refundable
+        FROM tickets t
+        JOIN products p ON t.product_id = p.id
+        JOIN events e ON p.event_id = e.id
+        WHERE t.buyer_chat_id = %s 
+          AND t.is_active = TRUE 
+          AND t.is_used = FALSE
+          AND t.is_refunded = FALSE
+    """, (chat_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{'id': r[0], 'event': r[1], 'prod': r[2], 'price': r[3], 'date': r[4], 'refundable': r[5]} for r in rows]
+
+
+def process_refund_ticket(ticket_id: str) -> tuple[bool, str, int, int]:
+    """
+    Аннулирует билет и возвращает информацию для админа.
+    Возврат: (Успех, Сообщение ошибки, ID покупателя, Цена)
+    """
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        # 1. Получаем данные и блокируем строку
+        cursor.execute("""
+            SELECT t.product_id, t.buyer_chat_id, t.final_price, p.is_refundable, e.org_id
+            FROM tickets t
+            JOIN products p ON t.product_id = p.id
+            JOIN events e ON p.event_id = e.id
+            WHERE t.ticket_id = %s FOR UPDATE
+        """, (ticket_id,))
+        row = cursor.fetchone()
+
+        if not row: return False, "Билет не найден", 0, 0
+
+        prod_id, buyer_id, price, is_refundable, org_id = row
+
+        if not is_refundable:
+            return False, "Этот билет невозвратный.", 0, 0
+
+        # 2. Аннулируем билет
+        cursor.execute("""
+            UPDATE tickets 
+            SET is_active = FALSE, is_refunded = TRUE 
+            WHERE ticket_id = %s
+        """, (ticket_id,))
+
+        # 3. Возвращаем "место" в продажу (уменьшаем счетчик проданного)
+        cursor.execute("""
+            UPDATE products 
+            SET quantity_sold = quantity_sold - 1 
+            WHERE id = %s
+        """, (prod_id,))
+
+        # 4. Получаем ID владельца организации для уведомления
+        cursor.execute("SELECT owner_id FROM organizations WHERE id = %s", (org_id,))
+        owner_row = cursor.fetchone()
+        admin_id = owner_row[0] if owner_row else 0
+
+        conn.commit()
+        return True, "OK", buyer_id, admin_id
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Refund error: {e}")
+        return False, "Ошибка БД", 0, 0
     finally:
         cursor.close()
         conn.close()

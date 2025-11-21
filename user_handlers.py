@@ -13,7 +13,7 @@ import qrcode
 import html  # Для escape_html
 
 # Абсолютные импорты
-from db_utils import get_active_orgs, get_org_events_public, get_event_products, get_product_info, find_promo, create_ticket_record, is_blacklisted, increment_promo_usage, add_user, activate_ticket_db, get_user_auth_status, register_user_db, get_user_by_login, authenticate_user_db, check_product_availability, get_org_card # <-- check_product_availability
+from db_utils import *
 from utils import cancel_global, escape_html, hash_password  # <-- hash_password
 
 # Определяем состояния для ConversationHandler

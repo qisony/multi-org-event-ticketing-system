@@ -6,7 +6,7 @@ import sys
 from dotenv import load_dotenv
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
-from db_utils import create_tables, add_bank_card_column
+from db_utils import create_tables, add_bank_card_column, migrate_refund_system
 from user_handlers import buy_handler, issue_ticket_from_admin_notification
 from admin_handlers import admin_handler
 from utils import cancel_global
