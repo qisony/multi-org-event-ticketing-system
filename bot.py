@@ -116,11 +116,21 @@ if __name__ == '__main__':
         # sys.exit(1)
         
     # 2. АСИНХРОННАЯ ОПЕРАЦИЯ (запуск бота)
+    loop = asyncio.get_event_loop()
+    
+    # Пытаемся запустить асинхронную функцию
     try:
         # Запускаем главную асинхронную функцию
-        asyncio.run(main_async())
+        loop.run_until_complete(main_async())
     except KeyboardInterrupt:
         logger.info("Бот остановлен вручную.")
+    finally:
+        # Принудительно закрываем цикл в конце
+        if loop.is_running():
+            # Это может помочь, если цикл не закрылся корректно после run_webhook
+            loop.stop()
+            loop.close()
     #except Exception as e:
     #    logger.critical(f"Критическая ошибка запуска приложения: {e}")
+
 
