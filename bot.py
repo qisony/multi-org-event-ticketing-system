@@ -121,5 +121,6 @@ if __name__ == '__main__':
         asyncio.run(main_async())
     except KeyboardInterrupt:
         logger.info("Бот остановлен вручную.")
-    except Exception as e:
-        logger.critical(f"Критическая ошибка запуска приложения: {e}")
+    #except Exception as e:
+    #    logger.critical(f"Критическая ошибка запуска приложения: {e}")
+
