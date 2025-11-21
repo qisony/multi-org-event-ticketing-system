@@ -682,17 +682,29 @@ def find_promo(code: str, event_id: int):
 
 # db_utils.py (ДОБАВИТЬ В КОНЕЦ ФАЙЛА или к функциям администрирования)
 
+# db_utils.py (фрагмент функции delete_organization_db)
+
 def delete_organization_db(org_id: int) -> bool:
-    """Удаляет организацию и все связанные данные (каскадно)."""
     conn = connect_db()
-    if not conn: return False
     cursor = conn.cursor()
     try:
+        # 1. Получаем ID владельца, чтобы сбросить его счетчик
+        cursor.execute("SELECT owner_id FROM organizations WHERE id = %s", (org_id,))
+        owner_id_row = cursor.fetchone()
+        owner_id = owner_id_row[0] if owner_id_row else None
+
+        # 2. Удаляем организацию, которая должна каскадно удалить всё связанное (события, продукты, билеты и т.д.)
         cursor.execute("DELETE FROM organizations WHERE id = %s", (org_id,))
+
+        # 3. ЕСЛИ ВЛАДЕЛЕЦ НАЙДЕН, УМЕНЬШАЕМ ЕГО СЧЕТЧИК
+        if owner_id:
+            cursor.execute("UPDATE users SET org_owned_count = org_owned_count - 1 WHERE chat_id = %s", (owner_id,))
+
         conn.commit()
         return True
     except Exception as e:
-        logging.error(f"Delete Org Error: {e}")
+        logging.error(f"Delete organization error: {e}")
+        conn.rollback()
         return False
     finally:
         cursor.close()
