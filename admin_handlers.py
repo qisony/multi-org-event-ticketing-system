@@ -1207,6 +1207,25 @@ async def confirm_delete_org(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return await list_orgs(update, context, direct_call=True)
 
 
+async def stop_bot_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Останавливает работу бота, если команду отправил Супер-Админ.
+    """
+    user_id = update.effective_user.id
+    
+    # 1. Проверка на Супер-Админа
+    if user_id != SUPER_ADMIN_ID:
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды.")
+        return
+
+    logging.warning(f"⚠️ Бот остановлен командой /stop_bot от Супер-Админа {user_id}.")
+    await update.message.reply_text("🔴 **Бот остановлен.** Завершаю работу...", parse_mode='HTML')
+    
+    # 2. Вызов грациозного завершения работы
+    await context.application.shutdown()
+
+
+
 # --- MAIN HANDLER (ОБНОВЛЕНО) ---
 
 admin_handler = ConversationHandler(
@@ -1397,6 +1416,7 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
 
