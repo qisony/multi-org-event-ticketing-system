@@ -143,6 +143,40 @@ def create_tables():
         conn.close()
 
 
+def get_user_role_in_org(user_id: int, org_id: int) -> str | None:
+    """
+    Получает наивысшую роль пользователя в конкретной организации.
+    Возвращает 'org_owner', 'org_admin', или None.
+    """
+    conn = connect_db()
+    if not conn: return None
+    cursor = conn.cursor()
+    
+    try:
+        # 1. Проверяем, является ли пользователь ИСТИННЫМ ВЛАДЕЛЬЦЕМ (owner_id в таблице organizations)
+        cursor.execute("SELECT owner_id FROM organizations WHERE id = %s", (org_id,))
+        org_row = cursor.fetchone()
+        
+        if org_row and org_row[0] == user_id:
+            return 'org_owner' # Используйте константу ROLE_ORG_OWNER из utils.py
+            
+        # 2. Проверяем, является ли пользователь АДМИНИСТРАТОРОМ (запись в org_admins)
+        cursor.execute("SELECT role FROM org_admins WHERE user_id = %s AND org_id = %s", (user_id, org_id))
+        admin_row = cursor.fetchone()
+        
+        if admin_row:
+            return admin_row[0] # Вернет 'org_admin' или 'org_owner'
+            
+    except Exception as e:
+        logging.error(f"Error getting user role in org {org_id}: {e}")
+        
+    finally:
+        cursor.close()
+        conn.close()
+        
+    return None
+    
+
 # --- ФУНКЦИЯ СБРОСА (НОВАЯ) ---
 def drop_all_tables() -> bool:
     """Полностью очищает базу данных (удаляет все таблицы)."""
@@ -913,4 +947,5 @@ def get_user_org_count(chat_id: int) -> int:
     finally:
         cursor.close()
         conn.close()
+
 
