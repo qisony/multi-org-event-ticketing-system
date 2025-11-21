@@ -374,6 +374,24 @@ async def ask_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return INPUT_ADD_ADMIN_LOGIN
 
 
+# admin_handlers.py
+
+async def ask_add_admin_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Запрашивает логин или ID пользователя, которого нужно сделать админом.
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    text = ("Введите *логин* пользователя (начиная с `@`) или его *Telegram ID*,"
+            " которого вы хотите назначить администратором организации.")
+    
+    await query.edit_message_text(text, parse_mode='Markdown')
+    
+    return INPUT_ADD_ADMIN_LOGIN # Убедитесь, что эта константа состояния определена
+    
+
+
 async def add_admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         new_admin_id = int(update.message.text)
@@ -1583,6 +1601,7 @@ admin_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_global), CallbackQueryHandler(cancel_global, pattern='^cancel_global')]
 
 )
+
 
 
 
