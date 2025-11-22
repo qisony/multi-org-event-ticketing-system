@@ -1,30 +1,18 @@
-# bot.py
+# bot.py (ИСПРАВЛЕННЫЙ)
 import asyncio
 import os
 import logging
 import sys
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
-# Импорт ваших модулей. Используем try/except для заглушек
-# (как в вашем коде, чтобы не падало, если модули не найдены)
-try:
-    from db_utils import create_tables
-    from user_handlers import buy_handler, issue_ticket_from_admin_notification
-    from admin_handlers import admin_handler, stop_bot_handler
-    from utils import cancel_global
-except ImportError as e:
-    # Заглушки для вашего кода:
-    logger.warning(f"Ошибка импорта локальных модулей: {e}. Используем заглушки.")
-    def create_tables(): pass
-    def buy_handler(): pass
-    def admin_handler(): pass
-    def stop_bot_handler(): pass
-    def issue_ticket_from_admin_notification(): pass
-    def cancel_global(): pass
+from db_utils import create_tables # Предполагается, что эти модули существуют
+from user_handlers import buy_handler, issue_ticket_from_admin_notification
+from admin_handlers import admin_handler, stop_bot_handler
+from utils import cancel_global
 
 # --- Настройка логирования ---
 LOG_FILE_NAME = "bot.log"
-# Очистка логов при перезапуске (оставляем, как у вас)
+# ... (логирование остается прежним)
 if os.path.exists(LOG_FILE_NAME):
     try:
         with open(LOG_FILE_NAME, 'w', encoding='utf-8') as f:
@@ -42,95 +30,67 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Загрузка переменных окружения и токена
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-
-# --- ГЛАВНАЯ АСИНХРОННАЯ ФУНКЦИЯ ДЛЯ WEBHOOK ---
-async def main_async():
+# --- ГЛАВНАЯ АСИНХРОННАЯ ФУНКЦИЯ ---
+async def run_bot_async():
     """
-    Настраивает и запускает Telegram-бота через Webhook на Render
-    в рамках единого цикла событий.
+    Создает, настраивает и запускает бот в асинхронном режиме.
     """
-    logger.info("Вход в main_async для инициализации бота.") 
-    
     if not TOKEN:
-        logger.critical("TELEGRAM_TOKEN не найден. Проверьте переменные окружения на Render.")
-        return # Выход, если токен пуст.
+        logger.critical("TELEGRAM_TOKEN не найден.")
+        return
 
-    logger.info("Токен успешно загружен. Создание Application.") 
+    # 1. Синхронная часть: Настройка БД
+    create_tables()
+
+    # 2. Настройка приложения
     app = Application.builder().token(TOKEN).build()
 
-    # --- ДОБАВЛЕНИЕ ВСЕХ HANDLER'ОВ ---
+    # Хендлеры (Остаются прежними)
     app.add_handler(buy_handler)
     app.add_handler(admin_handler)
     app.add_handler(CommandHandler("stop_bot", stop_bot_handler))
 
+    # Глобальный callback для админов 
     app.add_handler(CallbackQueryHandler(
         issue_ticket_from_admin_notification,
         pattern=r'^(adm_approve_|adm_reject_)[a-fA-F0-9]+$'
     ))
+
     app.add_handler(CommandHandler("cancel", cancel_global))
-    # ---------------------------------
 
-    # Настройка Webhook-параметров
+    logger.info("Bot started...")
+
+    # 3. Асинхронная часть: Настройка и запуск Webhook
+    # Render автоматически предоставляет эти переменные окружения
     RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
-    PORT = int(os.environ.get("PORT", 10000))
     WEBHOOK_PATH = "webhook"
+    PORT = int(os.environ.get("PORT", 10000))
+    
+    # 3.1. Установите Webhook URL на серверах Telegram
+    if RENDER_URL:
+        full_webhook_url = f"{RENDER_URL}/{WEBHOOK_PATH}"
+        logger.info(f"Setting Webhook URL: {full_webhook_url} on port {PORT}")
+        await app.bot.set_webhook(url=full_webhook_url)
 
-    if not RENDER_URL:
-        # Если RENDER_EXTERNAL_URL не установлен (локально), запускаем Polling
-        logger.error("Переменная RENDER_EXTERNAL_URL не установлена. Запуск через Polling (для локальной отладки).")
-        await app.run_polling(drop_pending_updates=True)
-        return
-
-    # 1. Установка Webhook (Требует await)
-    logger.info(f"Установка Webhook URL: {RENDER_URL}/{WEBHOOK_PATH} на порт {PORT}")
-    try:
-        await app.bot.set_webhook(
-            url=f"{RENDER_URL}/{WEBHOOK_PATH}"
+        # 3.2. Запустите Webhook-сервер (блокирует выполнение, пока сервер активен)
+        logger.info("Launching Webhook server. Bot is now active!")
+        await app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT, 
+            url_path=WEBHOOK_PATH
         )
-    except Exception as e:
-        logger.critical(f"Не удалось установить Webhook: {e}")
-        return
-
-    # 2. Запуск Webhook-сервера (Требует await и БЛОКИРУЕТ выполнение)
-    logger.info("Запуск Webhook-сервера. Бот теперь активен!")
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=WEBHOOK_PATH,
-    )
+    else:
+        logger.critical("RENDER_EXTERNAL_URL не найден. Убедитесь, что вы развертываете на Render Web Service.")
 
 
-# --- СИНХРОННАЯ ТОЧКА ВХОДА ---
+# --- ТОЧКА ВХОДА (ОДИН ВЫЗОВ asyncio.run) ---
 if __name__ == '__main__':
-    logger.info("Bot execution started...")
-    
-    # 1. СИНХРОННЫЕ ОПЕРАЦИИ (создание таблиц)
     try:
-        create_tables() 
+        asyncio.run(run_bot_async())
     except Exception as e:
-        logger.critical(f"Ошибка синхронной инициализации (DB): {e}")
-        # sys.exit(1)
-        
-    # 2. АСИНХРОННАЯ ОПЕРАЦИЯ (запуск бота)
-    loop = asyncio.get_event_loop()
-    
-    # Пытаемся запустить асинхронную функцию
-    try:
-        # Запускаем главную асинхронную функцию
-        loop.run_until_complete(main_async())
-    except KeyboardInterrupt:
-        logger.info("Бот остановлен вручную.")
-    finally:
-        # Принудительно закрываем цикл в конце
-        if loop.is_running():
-            # Это может помочь, если цикл не закрылся корректно после run_webhook
-            loop.stop()
-            loop.close()
-    #except Exception as e:
-    #    logger.critical(f"Критическая ошибка запуска приложения: {e}")
-
-
+        logger.error(f"Fatal error during bot execution: {e}")
+        # Это не должно случиться с исправленным кодом, 
+        # но обеспечивает чистое завершение в случае неожиданного сбоя.
