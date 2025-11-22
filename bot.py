@@ -1,4 +1,4 @@
-# bot.py (ИСПРАВЛЕННЫЙ КОД)
+# bot.py
 import asyncio
 import os
 import logging
@@ -6,7 +6,7 @@ import sys
 from dotenv import load_dotenv
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
-from db_utils import create_tables #, add_bank_card_column, migrate_refund_system # Оставим только те, что используются
+from db_utils import create_tables, add_bank_card_column, migrate_refund_system
 from user_handlers import buy_handler, issue_ticket_from_admin_notification
 from admin_handlers import admin_handler, stop_bot_handler
 from utils import cancel_global
@@ -14,6 +14,7 @@ from utils import cancel_global
 # --- Настройка логирования ---
 LOG_FILE_NAME = "bot.log"
 
+# Очистка логов при перезапуске
 if os.path.exists(LOG_FILE_NAME):
     try:
         with open(LOG_FILE_NAME, 'w', encoding='utf-8') as f:
@@ -34,27 +35,28 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Удаляем функцию set_up_webhook, ее логика переносится ниже.
-# Удаляем синхронную функцию main(), ее логика также переносится.
+# --- Удалена неиспользуемая и потенциально конфликтующая set_up_webhook ---
 
-# --- ЕДИНАЯ АСИНХРОННАЯ ТОЧКА ВХОДА ---
-async def main_async():
+
+async def start_bot():
     """
-    Основная асинхронная функция для настройки и запуска бота.
+    Основная асинхронная функция для настройки и запуска Webhook.
     """
     if not TOKEN:
         logger.critical("TELEGRAM_TOKEN не найден.")
         return
 
-    # 1. СИНХРОННАЯ ЧАСТЬ: Настройка БД
+    # СИНХРОННЫЙ КОД: Инициализация БД
     create_tables()
     # add_bank_card_column() # Раскомментируйте, если нужно
     # migrate_refund_system() # Раскомментируйте, если нужно
+    logger.info("DB Structure updated successfully.")
 
-    # 2. НАСТРОЙКА ПРИЛОЖЕНИЯ
+
+    # АСИНХРОННЫЙ КОД: Настройка приложения и Webhook
     app = Application.builder().token(TOKEN).build()
 
-    # Хендлеры (остаются прежними)
+    # Хендлеры
     app.add_handler(buy_handler)
     app.add_handler(admin_handler)
     app.add_handler(CommandHandler("stop_bot", stop_bot_handler))
@@ -66,37 +68,35 @@ async def main_async():
     ))
 
     app.add_handler(CommandHandler("cancel", cancel_global))
-
-    logger.info("Bot started...")
-
-    # 3. АСИНХРОННАЯ ЧАСТЬ: Настройка и запуск Webhook
+    
+    # Конфигурация Webhook
     RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
     WEBHOOK_PATH = "webhook" # Используем простой путь
-    PORT = int(os.environ.get("PORT", 10000)) # Порт, предоставленный Render
+    PORT = int(os.environ.get("PORT", 10000))
 
     if RENDER_URL:
         full_webhook_url = f"{RENDER_URL}/{WEBHOOK_PATH}"
+        
+        logger.info("Bot started...")
         logger.info(f"Setting Webhook URL: {full_webhook_url} on port {PORT}")
         
-        # Устанавливаем Webhook с использованием await (ВНУТРИ async функции)
+        # 1. Устанавливаем Webhook с использованием **await**
         await app.bot.set_webhook(url=full_webhook_url)
 
-        # Запускаем Webhook-сервер (ВНУТРИ async функции)
+        # 2. Запускаем Webhook-сервер с использованием **await**
         logger.info("Launching Webhook server. Bot is now active!")
-        
-        # app.run_webhook — это awaitable функция
         await app.run_webhook(
             listen="0.0.0.0",
             port=PORT,
-            url_path=WEBHOOK_PATH
+            url_path=WEBHOOK_PATH,
         )
     else:
-        logger.critical("RENDER_EXTERNAL_URL не найден. Убедитесь, что вы развертываете на Render Web Service.")
+        logger.critical("RENDER_EXTERNAL_URL не найден. Невозможно запустить Webhook-сервис.")
 
 
 if __name__ == '__main__':
-    # ОДИН ЕДИНСТВЕННЫЙ ВЫЗОВ asyncio.run()
+    # ОДИН ЕДИНСТВЕННЫЙ ВЫЗОВ asyncio.run() для запуска асинхронной функции
     try:
-        asyncio.run(main_async())
+        asyncio.run(start_bot())
     except Exception as e:
         logger.error(f"Fatal error during bot execution: {e}")
